@@ -1,5 +1,7 @@
+import collections
 import inspect
 import logging
+from abc import abstractmethod
 from enum import Enum
 
 import google.protobuf.descriptor
@@ -118,12 +120,6 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     def _message(self):
         return self.__message
 
-    def _update_from_pyobj(self, value):
-        raise NotImplementedError
-
-    def _as_pyobj(self):
-        raise NotImplementedError
-
     def _rebase(self, message):
         self.__message = message or self._MESSAGE_TYPE()
         self.__message_orig.CopyFrom(message)
@@ -139,16 +135,20 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         if not orig and attr in self.__persisted_fields:
             return self.__persisted_fields[attr]
 
-        if descriptor.label == descriptor.LABEL_REPEATED:
-            value = GRPCRepeatedMessageWrapper(getattr(self.__message_orig if orig else self.__message, attr), wrapper=GRPCMessageWrapper.for_kind(descriptor.message_type.full_name) if descriptor.message_type else None)
-        else:
-            value = GRPCMessageWrapper.for_message(getattr(self.__message_orig if orig else self.__message, attr))
+        value = getattr(self.__message_orig if orig else self.__message, attr)
 
-            if isinstance(value, GRPCMessageWrapper):
-                try:
-                    value = value._as_pyobj()
-                except NotImplementedError:
-                    pass
+        if descriptor.label == descriptor.LABEL_REPEATED:
+            if descriptor.message_type and descriptor.message_type.GetOptions().map_entry:
+                wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type.fields_by_name['value'].message_type)
+                value = GRPCMapMessageWrapper(value, wrapper=wrapper)
+            else:
+                wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type)
+                value = GRPCRepeatedMessageWrapper(value, wrapper=wrapper)
+        else:
+            value = GRPCMessageWrapper.for_message(value)
+
+            if isinstance(value, GRPCMessageWrapper) and hasattr(value, '__get__'):
+                value = value.__get__() if self.__message.HasField(attr) else None
             elif descriptor.enum_type:
                 value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](value)
 
@@ -185,10 +185,12 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
 
         wrapper = GRPCMessageWrapper.for_message(getattr(self.__message, attr))
         if isinstance(wrapper, GRPCMessageWrapper):
-            return wrapper._update_from_pyobj(value)
-        if value == descriptor.default_value:
-            return self.__message.ClearField(attr)
+            return wrapper.__set__(value)
         return self.__message.MergeFrom(self.__message.__class__(**{attr: value}))
+
+    def __delattr__(self, attr):
+        self.__message.ClearField(attr)
+        self.__persisted_fields.pop(attr, None)
 
     def __repr__(self):
         return f"GRPCMessageWrapper<{self.__class__.__name__}>"
@@ -215,7 +217,74 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         return MessageToDict(self._message, including_default_value_fields=True)
 
 
-class GRPCRepeatedMessageWrapper:
+class GRPCInvisibleWrapper(GRPCMessageWrapper):
+
+    @abstractmethod
+    def __get__(self):
+        raise NotImplementedError
+
+    @abstractmethod
+    def __set__(self, value):
+        raise NotImplementedError
+
+
+class GRPCInvisibleSequenceWrapper(GRPCInvisibleWrapper):
+
+    _SEQUENCE_ATTR = None
+
+    @override
+    def __get__(self):
+        return getattr(self, self._SEQUENCE_ATTR)
+
+    @override
+    def __set__(self, value):
+        sequence = getattr(self, self._SEQUENCE_ATTR)
+        while sequence:
+            sequence.pop()
+        sequence.extend(v._message if isinstance(v, GRPCMessageWrapper) else v for v in value)
+
+
+class GRPCMapMessageWrapper(collections.abc.MutableMapping):
+
+    def __init__(self, map, wrapper=None):
+        self._map = map
+        self._wrapper = wrapper
+
+    def __wrapped(self, obj):
+        return self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+
+    # MutableMapping implementations
+
+    def __getitem__(self, key):
+        if key in self._map:
+            return self.__wrapped(self._map[key])
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        if self._wrapper:
+            self._map[key].MergeFrom(value._message if isinstance(value, GRPCMessageWrapper) else value)
+        else:
+            self._map.__setitem__(key, value)
+
+    def __delitem__(self, key):
+        return self._map.__delitem__(key)
+
+    def __iter__(self):
+        return self._map.__iter__()
+
+    def __len__(self):
+        return self._map.__len__()
+
+    # Additional convenience methods
+
+    def add(self, key, **kwargs):
+        self[key] = self._wrapper(**kwargs)
+
+    def __repr__(self):
+        return repr(dict(self))
+
+
+class GRPCRepeatedMessageWrapper(collections.abc.MutableSequence):
 
     def __init__(self, sequence, wrapper=None):
         self._sequence = sequence
@@ -224,33 +293,26 @@ class GRPCRepeatedMessageWrapper:
     def __wrapped(self, obj):
         return self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
 
-    def __iter__(self):
-        for obj in self._sequence:
-            yield self.__wrapped(obj)
+    # MutableSequence implementations
 
     def __getitem__(self, index):
         return self.__wrapped(self._sequence[index])
 
-    def __setitem__(self, index, value):
-        pass
+    def __setitem__(self, index, obj):
+        return self._sequence.__setitem__(index, obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
 
     def __delitem__(self, index):
         return self._sequence.__delitem__(index)
 
-    def __repr__(self):
-        return list(self).__repr__()
-
     def __len__(self):
         return len(self._sequence)
 
-    def __add__(self, other):
-        if isinstance(other, GRPCRepeatedMessageWrapper):
-            self._sequence += other._sequence
-        elif isinstance(other, (list, tuple)):
-            self.extend(other)
-        else:
-            return NotImplemented
-        return self
+    def insert(self, index, obj):
+        if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
+            raise RuntimeError("Insertion is only supported for repeated scalar containers.")
+        self._sequence.insert(index, obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
+
+    # Additional convenience methods
 
     def add(self, **kwargs):
         if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
@@ -258,36 +320,5 @@ class GRPCRepeatedMessageWrapper:
         else:
             RuntimeError("Addition is only supported for repeated composite containers. Use `.append()` for scalar values.")
 
-    def append(self, obj):
-        if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
-            self._sequence.extend([obj._message if isinstance(obj, GRPCMessageWrapper) else obj])
-        else:
-            self._sequence.append(obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
-
-    def insert(self, index, obj):
-        if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
-            raise RuntimeError("Insertion is only supported for repeated scalar containers.")
-        self._sequence.insert(index, obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
-
-    def extend(self, objs):
-        for obj in objs:
-            self.append(obj)
-
-    def pop(self, index=-1):
-        self._sequence.pop(index)
-
-
-class GRPCInvisibleSequenceWrapper(GRPCMessageWrapper):
-
-    _SEQUENCE_ATTR = None
-
-    @override
-    def _update_from_pyobj(self, value):
-        sequence = getattr(self, self._SEQUENCE_ATTR)
-        while sequence:
-            sequence.pop()
-        sequence.extend(v._message if isinstance(v, GRPCMessageWrapper) else v for v in value)
-
-    @override
-    def _as_pyobj(self):
-        return getattr(self, self._SEQUENCE_ATTR)
+    def __repr__(self):
+        return repr(list(self))

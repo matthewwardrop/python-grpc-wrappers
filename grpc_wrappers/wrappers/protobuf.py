@@ -4,18 +4,18 @@ import google.protobuf.timestamp_pb2
 import google.protobuf.wrappers_pb2
 from interface_meta import override
 
-from ..wrapper import GRPCMessageWrapper
+from ..wrapper import GRPCInvisibleWrapper
 
 
-class ProtobufWrapper(GRPCMessageWrapper):
-
-    @override
-    def _update_from_pyobj(self, value):
-        self._message.value = value
+class ProtobufWrapper(GRPCInvisibleWrapper):
 
     @override
-    def _as_pyobj(self):
+    def __get__(self):
         return self._message.value
+
+    @override
+    def __set__(self, value):
+        self._message.value = value
 
 
 class ProtobufDoubleWrapper(ProtobufWrapper):
@@ -63,14 +63,14 @@ class ProtobufBoolWrapper(ProtobufWrapper):
     _MESSAGE_TYPE = google.protobuf.wrappers_pb2.BoolValue
 
 
-class ProtobufTimestampWrapper(GRPCMessageWrapper):
+class ProtobufTimestampWrapper(GRPCInvisibleWrapper):
 
     _MESSAGE_TYPE = google.protobuf.timestamp_pb2.Timestamp
 
     @override
-    def _update_from_pyobj(self, value):
-        self._message.FromDatetime(arrow.get(value))
+    def __get__(self):
+        return self._message.ToDatetime() if self._message.seconds > 0 or self._message.nanos > 0 else None
 
     @override
-    def _as_pyobj(self):
-        return self._message.ToDatetime() if self._message.seconds > 0 or self._message.nanos > 0 else None
+    def __set__(self, value):
+        self._message.FromDatetime(arrow.get(value))
