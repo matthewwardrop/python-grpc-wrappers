@@ -2,6 +2,7 @@ import inspect
 import logging
 from enum import Enum
 
+import google.protobuf.descriptor
 import google.protobuf.message
 import google.protobuf.pyext._message
 from google.protobuf.symbol_database import Default as get_grpc_symbol_database
@@ -71,6 +72,10 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
         return property(fget=get_field, fset=set_field)
 
     def for_kind(cls, kind):
+        if kind is None:
+            return
+        if isinstance(kind, google.protobuf.descriptor.Descriptor):
+            kind = kind.full_name
         if isinstance(kind, str):
             kind = GRPC_SYMBOL_DATABASE.GetSymbol(kind)
         assert inspect.isclass(kind) and issubclass(kind, google.protobuf.message.Message)
