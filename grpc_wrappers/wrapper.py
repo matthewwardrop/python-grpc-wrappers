@@ -65,11 +65,11 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
     def __get_field_property_method(cls, field):
 
         def get_field(self):
-            return self.__getattr__(self, field)
+            return self.__getattr__(field)
         get_field.__name__ = field
 
         def set_field(self):
-            return self.__setattr__(self, field)
+            return self.__setattr__(field)
 
         return property(fget=get_field, fset=set_field)
 
