@@ -104,14 +104,12 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     _IMMUTABLE_FIELDS = ()
     _IGNORED_FIELDS = ()
 
-    __slots__ = ['__message', '__message_orig', '__persisted_fields']
+    __slots__ = ['__message', '__persisted_fields']
 
     def __init__(self, _message=None, **kwargs):
         self.__persisted_fields = {}
         self.__message = _message or self._MESSAGE_TYPE()
         self._init(**kwargs)
-        self.__message_orig = type(self.__message)()
-        self.__message_orig.CopyFrom(self.__message)
 
     def _init(self, **kwargs):
         self << kwargs
@@ -120,22 +118,24 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     def _message(self):
         return self.__message
 
-    def _rebase(self, message):
-        self.__message = message or self._MESSAGE_TYPE()
-        self.__message_orig.CopyFrom(message)
+    @property
+    def _message_copy(self):
+        message = type(self.__message)()
+        message.CopyFrom(self.__message)
+        return message
 
     def __dir__(self):
         return set([*(f.name for f in self.__message.DESCRIPTOR.fields if f.name not in self._IGNORED_FIELDS), *super().__dir__()])
 
-    def __getattr__(self, attr, orig=False):
-        descriptor = self._message.DESCRIPTOR.fields_by_name.get(attr)
-        if not descriptor or attr in self._IGNORED_FIELDS:
-            raise AttributeError(attr)
+    @property
+    def __message_fields(self):
+        return set(self._message.DESCRIPTOR.fields_by_name)
 
-        if not orig and attr in self.__persisted_fields:
-            return self.__persisted_fields[attr]
+    def __get_field_descriptor(self, field):
+        return self._message.DESCRIPTOR.fields_by_name[field]
 
-        value = getattr(self.__message_orig if orig else self.__message, attr)
+    def __get_wrapped_value(self, field, value, evaluate_getters=True):
+        descriptor = self.__get_field_descriptor(field)
 
         if descriptor.label == descriptor.LABEL_REPEATED:
             if descriptor.message_type and descriptor.message_type.GetOptions().map_entry:
@@ -147,27 +147,22 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         else:
             value = GRPCMessageWrapper.for_message(value)
 
-            if isinstance(value, GRPCMessageWrapper) and hasattr(value, '__get__'):
-                value = value.__get__() if self.__message.HasField(attr) else None
-            elif descriptor.enum_type:
-                value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](value)
-
-        if not orig:
-            self.__persisted_fields[attr] = value
+        if evaluate_getters and hasattr(value, '__get__'):
+            value = value.__get__() if self.__message.HasField(field) else None
 
         return value
 
-    def __setattr__(self, attr, value):
-        if attr.startswith('_'):
-            return super().__setattr__(attr, value)
+    def __get_wrapped_field_value(self, field, evaluate_getters=True):
+        return self.__get_wrapped_value(
+            field=field,
+            value=getattr(self.__message, field),
+            evaluate_getters=evaluate_getters,
+        )
 
-        descriptor = self._message.DESCRIPTOR.fields_by_name.get(attr)
-        if not descriptor or attr in self._IGNORED_FIELDS:
-            raise AttributeError(attr)
+    def __set_field_value(self, field, value):
+        descriptor = self.__get_field_descriptor(field)
 
-        if attr in self._IMMUTABLE_FIELDS:
-            raise AttributeError(f"{attr} is immutable.")
-
+        # Prepare value
         if descriptor.enum_type:
             if self._MESSAGE_TYPE:
                 enum_type = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name]
@@ -179,14 +174,36 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
                     raise ValueError(value)
                 value = value.value
             else:
-                logging.warning(f"`{attr}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
+                logging.warning(f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
 
-        self.__persisted_fields.pop(attr, None)
-
-        wrapper = GRPCMessageWrapper.for_message(getattr(self.__message, attr))
-        if isinstance(wrapper, GRPCMessageWrapper):
+        # Commit new value into object. We use `GRPCMessageWrapper` in order to
+        # allow wrappers to customise this setting.
+        wrapper = GRPCMessageWrapper.for_message(getattr(self.__message, field))
+        if hasattr(wrapper, '__set__'):
             return wrapper.__set__(value)
-        return self.__message.MergeFrom(self.__message.__class__(**{attr: value}))
+
+        self.__persisted_fields.pop(field, None)
+        return self.__message.MergeFrom(self.__message.__class__(**{field: value}))
+
+    # External API
+
+    def __getattr__(self, attr):
+        if attr not in self.__message_fields or attr in self._IGNORED_FIELDS:
+            raise AttributeError(attr)
+
+        if attr not in self.__persisted_fields:
+            self.__persisted_fields[attr] = self.__get_wrapped_field_value(field=attr)
+        return self.__persisted_fields[attr]
+
+    def __setattr__(self, attr, value):
+        if attr.startswith('_'):
+            return super().__setattr__(attr, value)
+        elif attr not in self.__message_fields or attr in self._IGNORED_FIELDS:
+            raise AttributeError(attr)
+        elif attr in self._IMMUTABLE_FIELDS:
+            raise AttributeError(f"`{attr}` is immutable.")
+
+        return self.__set_field_value(field=attr, value=value)
 
     def __delattr__(self, attr):
         self.__message.ClearField(attr)
@@ -202,15 +219,31 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
             setattr(self, key, value)
         return self
 
-    @property
-    def _changes(self):
-        if self.__message == self.__message_orig:
-            return print("No changes.")
+    def _compare(self, ref=None):
+        ref = ref or type(self.__message)()
+        if isinstance(ref, GRPCMessageWrapper):
+            ref = ref._message
+        if self.__message == ref:
+            return
 
-        print(f"{self.__class__.__name__}:")
-        for field in self.__message.DESCRIPTOR.fields:
-            if getattr(self.__message, field.name) != getattr(self.__message_orig, field.name):
-                print(f"{field.name}: {self.__getattr__(field.name, orig=True)} -> {getattr(self, field.name)}")
+        comparison = {}
+
+        for field_name in self.__message_fields:
+            if field_name in self._IGNORED_FIELDS or field_name in self._IMMUTABLE_FIELDS:
+                continue
+            if getattr(ref, field_name) != getattr(self.__message, field_name):
+                field_value = self.__get_wrapped_field_value(field_name, evaluate_getters=False)
+                if isinstance(field_value, GRPCMessageWrapper):
+                    nested_comparison = field_value._compare(ref=getattr(ref, field_name))
+                    if nested_comparison:
+                        comparison[field_name] = nested_comparison
+                else:
+                    comparison[field_name] = (
+                        self.__get_wrapped_value(field=field_name, value=getattr(ref, field_name)),
+                        self.__get_wrapped_field_value(field_name),
+                    )
+
+        return comparison
 
     def _to_json(self):
         from google.protobuf.json_format import MessageToDict
@@ -242,6 +275,10 @@ class GRPCInvisibleSequenceWrapper(GRPCInvisibleWrapper):
         while sequence:
             sequence.pop()
         sequence.extend(v._message if isinstance(v, GRPCMessageWrapper) else v for v in value)
+
+    @override
+    def _compare(self, ref=None):
+        return super()._compare(ref=ref).get(self._SEQUENCE_ATTR)
 
 
 class GRPCMapMessageWrapper(collections.abc.MutableMapping):

@@ -17,6 +17,10 @@ class ProtobufWrapper(GRPCInvisibleWrapper):
     def __set__(self, value):
         self._message.value = value
 
+    @override
+    def _compare(self, ref=None):
+        return super()._compare(ref=ref).get('value')
+
 
 class ProtobufDoubleWrapper(ProtobufWrapper):
 
@@ -74,3 +78,8 @@ class ProtobufTimestampWrapper(GRPCInvisibleWrapper):
     @override
     def __set__(self, value):
         self._message.FromDatetime(arrow.get(value))
+
+    @override
+    def _compare(self, ref=None):
+        if self._message.seconds != ref.seconds:
+            return (ref.ToDatetime(), self._message.ToDatetime())
