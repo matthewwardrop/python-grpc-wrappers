@@ -249,9 +249,13 @@ class GRPCMapMessageWrapper(collections.abc.MutableMapping):
     def __init__(self, map, wrapper=None):
         self._map = map
         self._wrapper = wrapper
+        self.__wrapper_cache = {}
 
     def __wrapped(self, obj):
-        return self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+        cache_key = id(obj)
+        if cache_key not in self.__wrapper_cache:
+            self.__wrapper_cache[cache_key] = self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+        return self.__wrapper_cache[cache_key]
 
     # MutableMapping implementations
 
@@ -261,12 +265,15 @@ class GRPCMapMessageWrapper(collections.abc.MutableMapping):
         raise KeyError(key)
 
     def __setitem__(self, key, value):
+        wrapper_cache_key = id(self._map[key])
         if self._wrapper:
             self._map[key].MergeFrom(value._message if isinstance(value, GRPCMessageWrapper) else value)
         else:
             self._map.__setitem__(key, value)
+        self.__wrapper_cache.pop(wrapper_cache_key, None)
 
     def __delitem__(self, key):
+        self.__wrapper_cache.pop(id(self._map[key]), None)
         return self._map.__delitem__(key)
 
     def __iter__(self):
@@ -289,9 +296,13 @@ class GRPCRepeatedMessageWrapper(collections.abc.MutableSequence):
     def __init__(self, sequence, wrapper=None):
         self._sequence = sequence
         self._wrapper = wrapper
+        self.__wrapper_cache = {}
 
     def __wrapped(self, obj):
-        return self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+        cache_key = id(obj)
+        if cache_key not in self.__wrapper_cache:
+            self.__wrapper_cache[cache_key] = self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+        return self.__wrapper_cache[cache_key]
 
     # MutableSequence implementations
 
@@ -299,9 +310,12 @@ class GRPCRepeatedMessageWrapper(collections.abc.MutableSequence):
         return self.__wrapped(self._sequence[index])
 
     def __setitem__(self, index, obj):
-        return self._sequence.__setitem__(index, obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
+        obj = obj._message if isinstance(obj, GRPCMessageWrapper) else obj
+        self.__wrapper_cache.pop(id(self._sequence[index]), None)
+        return self._sequence.__setitem__(index, obj)
 
     def __delitem__(self, index):
+        self.__wrapper_cache.pop(id(self._sequence[index]), None)
         return self._sequence.__delitem__(index)
 
     def __len__(self):
