@@ -144,6 +144,8 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
             else:
                 wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type)
                 value = GRPCRepeatedMessageWrapper(value, wrapper=wrapper)
+        elif descriptor.enum_type:
+            value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](value)
         else:
             value = GRPCMessageWrapper.for_message(value)
 
