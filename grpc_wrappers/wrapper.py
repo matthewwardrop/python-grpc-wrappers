@@ -10,6 +10,8 @@ import google.protobuf.pyext._message
 from google.protobuf.symbol_database import Default as get_grpc_symbol_database
 from interface_meta import InterfaceMeta, override
 
+from .utils import cast_enum_type_to_int
+
 
 GRPC_SYMBOL_DATABASE = get_grpc_symbol_database()
 
@@ -142,7 +144,11 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
                 wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type.fields_by_name['value'].message_type)
                 value = GRPCMapMessageWrapper(value, wrapper=wrapper)
             else:
-                wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type)
+                wrapper = (
+                    GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name]
+                    if descriptor.enum_type else
+                    GRPCMessageWrapper.for_kind(descriptor.message_type)
+                )
                 value = GRPCRepeatedMessageWrapper(value, wrapper=wrapper)
         elif descriptor.enum_type:
             value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](value)
@@ -164,25 +170,21 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     def __set_field_value(self, field, value):
         descriptor = self.__get_field_descriptor(field)
 
-        # Prepare value
-        if descriptor.enum_type:
-            if self._MESSAGE_TYPE:
-                enum_type = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name]
-                if isinstance(value, str):
-                    value = enum_type[value]
-                elif isinstance(value, int):
-                    value = enum_type(value)
-                if not isinstance(value, enum_type):
-                    raise ValueError(value)
-                value = value.value
-            else:
-                logging.warning(f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
-
-        # Commit new value into object. We use `GRPCMessageWrapper` in order to
-        # allow wrappers to customise this setting.
-        wrapper = GRPCMessageWrapper.for_message(getattr(self.__message, field))
+        # Allow wrappers to handle setting if this is not directly set on the
+        # message wrapped by this instance.
+        wrapper = self.__get_wrapped_field_value(field, evaluate_getters=False)
         if hasattr(wrapper, '__set__'):
             return wrapper.__set__(value)
+
+        # Prepare enum values
+        if descriptor.enum_type:
+            if self._MESSAGE_TYPE:
+                value = cast_enum_type_to_int(
+                    enum_type=GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name],
+                    value=value
+                )
+            else:
+                logging.warning(f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
 
         self.__persisted_fields.pop(field, None)
         return self.__message.MergeFrom(self.__message.__class__(**{field: value}))
@@ -283,36 +285,51 @@ class GRPCInvisibleSequenceWrapper(GRPCInvisibleWrapper):
         return super()._compare(ref=ref).get(self._SEQUENCE_ATTR)
 
 
-class GRPCMapMessageWrapper(collections.abc.MutableMapping):
+class GRPCContainerWrapper:
 
-    def __init__(self, map, wrapper=None):
-        self._map = map
+    def __init__(self, wrapper=None):
         self._wrapper = wrapper
         self.__wrapper_cache = {}
 
-    def __wrapped(self, obj):
+    def _wrap(self, obj):
         cache_key = id(obj)
         if cache_key not in self.__wrapper_cache:
             self.__wrapper_cache[cache_key] = self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
         return self.__wrapper_cache[cache_key]
 
+    def _unwrap(self, obj):
+        if isinstance(obj, GRPCMessageWrapper):
+            return obj._message
+        if isinstance(self._wrapper, Enum):
+            return cast_enum_type_to_int(self._wrapper, obj)
+        return obj
+
+    def _wrapper_purge(self, obj):
+        self.__wrapper_cache.pop(id(obj), None)
+
+
+class GRPCMapMessageWrapper(GRPCContainerWrapper, collections.abc.MutableMapping):
+
+    def __init__(self, map, wrapper=None):
+        self._map = map
+        GRPCContainerWrapper.__init__(self, wrapper=wrapper)
+
     # MutableMapping implementations
 
     def __getitem__(self, key):
         if key in self._map:
-            return self.__wrapped(self._map[key])
+            return self._wrap(self._map[key])
         raise KeyError(key)
 
     def __setitem__(self, key, value):
-        wrapper_cache_key = id(self._map[key])
+        self._wrapper_purge(self._map[key])
         if self._wrapper:
-            self._map[key].MergeFrom(value._message if isinstance(value, GRPCMessageWrapper) else value)
+            self._map[key].MergeFrom(self._unwrap(value))
         else:
             self._map.__setitem__(key, value)
-        self.__wrapper_cache.pop(wrapper_cache_key, None)
 
     def __delitem__(self, key):
-        self.__wrapper_cache.pop(id(self._map[key]), None)
+        self._wrapper_purge(self._map[key])
         return self._map.__delitem__(key)
 
     def __iter__(self):
@@ -330,40 +347,45 @@ class GRPCMapMessageWrapper(collections.abc.MutableMapping):
         return repr(dict(self))
 
 
-class GRPCRepeatedMessageWrapper(collections.abc.MutableSequence):
+class GRPCRepeatedMessageWrapper(GRPCContainerWrapper, collections.abc.MutableSequence):
 
     def __init__(self, sequence, wrapper=None):
         self._sequence = sequence
-        self._wrapper = wrapper
-        self.__wrapper_cache = {}
+        GRPCContainerWrapper.__init__(self, wrapper=wrapper)
 
-    def __wrapped(self, obj):
-        cache_key = id(obj)
-        if cache_key not in self.__wrapper_cache:
-            self.__wrapper_cache[cache_key] = self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
-        return self.__wrapper_cache[cache_key]
+    def __set__(self, values):
+        # To avoid clearing existing values if new values are invalid, we extend
+        # first, and then clear up to the first new index.
+        index = len(self._sequence)
+        self.extend(values)
+        for i in range(index):
+            self.pop(0)
 
     # MutableSequence implementations
 
     def __getitem__(self, index):
-        return self.__wrapped(self._sequence[index])
+        return self._wrap(self._sequence[index])
 
     def __setitem__(self, index, obj):
-        obj = obj._message if isinstance(obj, GRPCMessageWrapper) else obj
-        self.__wrapper_cache.pop(id(self._sequence[index]), None)
-        return self._sequence.__setitem__(index, obj)
+        self._wrapper_purge(self._sequence[index])
+        return self._sequence.__setitem__(index, self._unwrap(obj))
 
     def __delitem__(self, index):
-        self.__wrapper_cache.pop(id(self._sequence[index]), None)
+        self._wrapper_purge(self._sequence[index])
         return self._sequence.__delitem__(index)
 
     def __len__(self):
         return len(self._sequence)
 
     def insert(self, index, obj):
+        obj = self._unwrap(obj)
         if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
-            raise RuntimeError("Insertion is only supported for repeated scalar containers.")
-        self._sequence.insert(index, obj._message if isinstance(obj, GRPCMessageWrapper) else obj)
+            if index == len(self):
+                self._sequence.extend([obj])
+            else:
+                raise RuntimeError("Insertion is only supported for repeated scalar containers.")
+        else:
+            self._sequence.insert(index, obj)
 
     # Additional convenience methods
 

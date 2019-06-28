@@ -1,1 +1,1 @@
-from . import protobuf  # noqa: F401
+from . import google  # noqa: F401
