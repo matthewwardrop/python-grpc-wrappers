@@ -110,6 +110,11 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     __slots__ = ['__message', '__persisted_fields']
 
     def __init__(self, _message=None, **kwargs):
+        if self._MESSAGE_TYPE is None:
+            raise RuntimeError(
+                "`GRPCMessageWrapper` should not be instantiated directly. "
+                "Please use `GRPCMessageWrapper.for_message(...)` instead."
+            )
         self.__persisted_fields = {}
         self.__message = _message or self._MESSAGE_TYPE()
         self._init(**kwargs)

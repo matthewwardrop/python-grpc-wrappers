@@ -6,6 +6,11 @@ from example_grpc.example_pb2 import ExampleMessage
 from grpc_wrappers import GRPCMessageWrapper, GRPCRepeatedMessageWrapper
 
 
+def test_direct_instantiation(message):
+    with pytest.raises(RuntimeError):
+        GRPCMessageWrapper(message)
+
+
 def test_basic_types(wrapped):
     assert wrapped.bool_value is False
     assert wrapped.int_value == 0
