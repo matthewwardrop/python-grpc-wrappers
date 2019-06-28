@@ -18,7 +18,8 @@ deploy:
   user: mister.wardrop
   password:
     secure: "SdYM5ALetYnTRLz2UNHA7Z7Culmg5+nDdBpFFZZLRzW4n6LUlRre54xKpSl1K4DMtPWW6KL3fc6uUVBkspzuqb6M2f52z8AX2RU1MjGzYmMtBoAeWVhxuR5aH28ZUgWJWxM/IgJH55H3miii5P6e55bWK4K0595qIrT3eLPv2iDoG+eSvNQ9RnCCWG24iSgPH673Zz4bQ1A/MT3vWcun+QRf9SzujPAF91JAD9P2iPFyr+LBDJK+IPA0PHoWc44PyLBt0RZynbbQcZlrChRf3M8BURIdhTndkOV++6DYKOwaj9dl7YWpZj5vZod+boJLk83QdU8sQwgU/YF5Ou2P1KMWTExoYOGd2BxE7dSv+wYff5VcNNcwdlJbWzF94DvVHJE3zU91sT205kcOQfZOZeKwsiF+zRR41B5ZVQj6TVyFPEe/AfiBeq+Por1pPgKO8HZK2L6z3NauHpQ1vptNqdM9LbMdrd146nwkMB08iMWnW5qMoxO6BRL2RmJ/joTBNEMnLMzBkHrEggo9lk0/XXftaLz8NaXvxRapJIRw3+nxB38nRK3ZcK0mhYNmZLzuOTW68pxzxn3jXabiHxHpdacexoS/xUka2Ktbh2dZRBY9XjrFD6KijKgJMQeyeiA48Pl2tLCqhwtRPhmrFRTeF3T1dvNBGw7Q3hb8KIP7Jic="
+  distributions: sdist bdist_wheel
+  repo: matthewwardrop/python-grpc-wrappers
+  on:
     tags: true
     python: "3.6"
-    distributions: sdist bdist_wheel
-    repo: matthewwardrop/python-grpc-wrappers
