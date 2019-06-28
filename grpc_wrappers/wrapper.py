@@ -1,6 +1,7 @@
 import collections
 import inspect
 import logging
+import warnings
 from abc import abstractmethod
 from enum import Enum
 
@@ -138,6 +139,13 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
 
     def __get_wrapped_value(self, field, value, evaluate_getters=True):
         descriptor = self.__get_field_descriptor(field)
+
+        # Warn about deprecated field usage
+        if descriptor.GetOptions().deprecated:
+            warnings.warn(
+                f"`{self._message.__class__.__name__}.{field}` is deprecated and may disappear in the future.",
+                DeprecationWarning
+            )
 
         if descriptor.label == descriptor.LABEL_REPEATED:
             if descriptor.message_type and descriptor.message_type.GetOptions().map_entry:
