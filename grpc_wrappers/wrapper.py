@@ -204,6 +204,9 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
                 logging.warning(f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
 
         self.__persisted_fields.pop(field, None)
+        # If value is wrapped, unwrap it before assigning to the GRPC message.
+        if isinstance(value, GRPCMessageWrapper):
+            value = value._message
         return self.__message.MergeFrom(self.__message.__class__(**{field: value}))
 
     # External API
