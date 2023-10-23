@@ -116,6 +116,10 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
                 "Please use `GRPCMessageWrapper.for_message(...)` instead."
             )
         self.__persisted_fields = {}
+        if isinstance(_message, GRPCMessageWrapper):
+            raise ValueError(
+                "Cannot wrap already wrapped message. Use `.for_message(...)` instead."
+            )
         self.__message = _message or self._MESSAGE_TYPE()
         self._init(**kwargs)
 
