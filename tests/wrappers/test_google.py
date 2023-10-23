@@ -22,11 +22,11 @@ def test_google_wrappers_set(wrapped):
     assert wrapped.wrapped_bool_value is True
     assert wrapped.wrapped_float_value == 1000
     assert wrapped.wrapped_string_value == "Test String"
-    assert arrow.get(wrapped.wrapped_timestamp).timestamp == pytest.approx(timestamp)
+    assert arrow.get(wrapped.wrapped_timestamp).timestamp() == pytest.approx(timestamp)
 
     assert set(wrapped._compare()) == {
-        'wrapped_bool_value',
-        'wrapped_float_value',
-        'wrapped_string_value',
-        'wrapped_timestamp',
+        "wrapped_bool_value",
+        "wrapped_float_value",
+        "wrapped_string_value",
+        "wrapped_timestamp",
     }
