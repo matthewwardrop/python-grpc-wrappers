@@ -7,7 +7,7 @@ from enum import Enum
 
 import google.protobuf.descriptor
 import google.protobuf.message
-import google.protobuf.pyext._message
+import google.protobuf.internal.containers
 from google.protobuf.symbol_database import Default as get_grpc_symbol_database
 from interface_meta import InterfaceMeta, override
 
@@ -26,8 +26,12 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
         if not cls._MESSAGE_TYPE:
             return
 
-        if not inspect.isclass(cls._MESSAGE_TYPE) or not issubclass(cls._MESSAGE_TYPE, google.protobuf.message.Message):
-            raise ValueError(f"Class `{cls.__name__}` has an invalid `_MESSAGE_TYPE`. Object of type `{cls._MESSAGE_TYPE.__class__.__name__}` is not a subclass of `google.protobuf.message.Message`.")
+        if not inspect.isclass(cls._MESSAGE_TYPE) or not issubclass(
+            cls._MESSAGE_TYPE, google.protobuf.message.Message
+        ):
+            raise ValueError(
+                f"Class `{cls.__name__}` has an invalid `_MESSAGE_TYPE`. Object of type `{cls._MESSAGE_TYPE.__class__.__name__}` is not a subclass of `google.protobuf.message.Message`."
+            )
 
         # Register subclass
         cls._WRAPPERS[cls._MESSAGE_TYPE.DESCRIPTOR.full_name] = cls
@@ -47,28 +51,26 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
                         break
 
                 if not collides_in_metaclass:
-                    logging.warning(f"Field `{field}` of `{cls._MESSAGE_TYPE}` is masked by class attributes.")
+                    logging.warning(
+                        f"Field `{field}` of `{cls._MESSAGE_TYPE}` is masked by class attributes."
+                    )
                     continue
 
             # Add field wrappers so that the attributes appear in class documentation
-            setattr(
-                cls, field, cls.__get_field_property_method(field)
-            )
+            setattr(cls, field, cls.__get_field_property_method(field))
 
             # Add enum specifications to class definition
             if desc.enum_type:
                 if desc.enum_type.full_name not in cls._ENUM_TYPES:
-                    cls._ENUM_TYPES[desc.enum_type.full_name] = (
-                        Enum(desc.enum_type.name, [
-                            (v.name, v.number)
-                            for v in desc.enum_type.values
-                        ])
+                    cls._ENUM_TYPES[desc.enum_type.full_name] = Enum(
+                        desc.enum_type.name,
+                        [(v.name, v.number) for v in desc.enum_type.values],
                     )
 
     def __get_field_property_method(cls, field):
-
         def get_field(self):
             return self.__getattr__(field)
+
         get_field.__name__ = field
 
         def set_field(self):
@@ -83,9 +85,15 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
             kind = kind.full_name
         if isinstance(kind, str):
             kind = GRPC_SYMBOL_DATABASE.GetSymbol(kind)
-        assert inspect.isclass(kind) and issubclass(kind, google.protobuf.message.Message)
+        assert inspect.isclass(kind) and issubclass(
+            kind, google.protobuf.message.Message
+        )
         if kind.DESCRIPTOR.full_name not in cls._WRAPPERS:
-            GRPCMessageWrapperMeta(kind.DESCRIPTOR.full_name, (GRPCMessageWrapper, ), {'_MESSAGE_TYPE': kind})
+            GRPCMessageWrapperMeta(
+                kind.DESCRIPTOR.full_name,
+                (GRPCMessageWrapper,),
+                {"_MESSAGE_TYPE": kind},
+            )
         return cls._WRAPPERS[kind.DESCRIPTOR.full_name]
 
     def for_message(cls, message):
@@ -96,8 +104,11 @@ class GRPCMessageWrapperMeta(InterfaceMeta):
     def from_json(cls, json, message_type=None):
         message_type = message_type or getattr(cls, "_MESSAGE_TYPE", None)
         if not message_type:
-            raise RuntimeError("`from_json()` can only be called on a wrapper which has `_MESSAGE_TYPE` set, or by passing in message_type specifically.")
+            raise RuntimeError(
+                "`from_json()` can only be called on a wrapper which has `_MESSAGE_TYPE` set, or by passing in message_type specifically."
+            )
         from google.protobuf.json_format import ParseDict
+
         return cls.for_message(ParseDict(json, message_type()))
 
 
@@ -107,7 +118,7 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     _IMMUTABLE_FIELDS = ()
     _IGNORED_FIELDS = ()
 
-    __slots__ = ['__message', '__persisted_fields']
+    __slots__ = ["__message", "__persisted_fields"]
 
     def __init__(self, _message=None, **kwargs):
         if self._MESSAGE_TYPE is None:
@@ -137,7 +148,16 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         return message
 
     def __dir__(self):
-        return set([*(f.name for f in self.__message.DESCRIPTOR.fields if f.name not in self._IGNORED_FIELDS), *super().__dir__()])
+        return set(
+            [
+                *(
+                    f.name
+                    for f in self.__message.DESCRIPTOR.fields
+                    if f.name not in self._IGNORED_FIELDS
+                ),
+                *super().__dir__(),
+            ]
+        )
 
     @property
     def __message_fields(self):
@@ -153,26 +173,33 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         if descriptor.GetOptions().deprecated:
             warnings.warn(
                 f"`{self._message.__class__.__name__}.{field}` is deprecated and may disappear in the future.",
-                DeprecationWarning
+                DeprecationWarning,
             )
 
         if descriptor.label == descriptor.LABEL_REPEATED:
-            if descriptor.message_type and descriptor.message_type.GetOptions().map_entry:
-                wrapper = GRPCMessageWrapper.for_kind(descriptor.message_type.fields_by_name['value'].message_type)
+            if (
+                descriptor.message_type
+                and descriptor.message_type.GetOptions().map_entry
+            ):
+                wrapper = GRPCMessageWrapper.for_kind(
+                    descriptor.message_type.fields_by_name["value"].message_type
+                )
                 value = GRPCMapMessageWrapper(value, wrapper=wrapper)
             else:
                 wrapper = (
                     GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name]
-                    if descriptor.enum_type else
-                    GRPCMessageWrapper.for_kind(descriptor.message_type)
+                    if descriptor.enum_type
+                    else GRPCMessageWrapper.for_kind(descriptor.message_type)
                 )
                 value = GRPCRepeatedMessageWrapper(value, wrapper=wrapper)
         elif descriptor.enum_type:
-            value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](value)
+            value = GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name](
+                value
+            )
         else:
             value = GRPCMessageWrapper.for_message(value)
 
-        if evaluate_getters and hasattr(value, '__get__'):
+        if evaluate_getters and hasattr(value, "__get__"):
             value = value.__get__() if self.__message.HasField(field) else None
 
         return value
@@ -190,18 +217,22 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         # Allow wrappers to handle setting if this is not directly set on the
         # message wrapped by this instance.
         wrapper = self.__get_wrapped_field_value(field, evaluate_getters=False)
-        if hasattr(wrapper, '__set__'):
+        if hasattr(wrapper, "__set__"):
             return wrapper.__set__(value)
 
         # Prepare enum values
         if descriptor.enum_type:
             if self._MESSAGE_TYPE:
                 value = cast_enum_type_to_int(
-                    enum_type=GRPCMessageWrapper._ENUM_TYPES[descriptor.enum_type.full_name],
-                    value=value
+                    enum_type=GRPCMessageWrapper._ENUM_TYPES[
+                        descriptor.enum_type.full_name
+                    ],
+                    value=value,
                 )
             else:
-                logging.warning(f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care.")
+                logging.warning(
+                    f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care."
+                )
 
         self.__persisted_fields.pop(field, None)
         # If value is wrapped, unwrap it before assigning to the GRPC message.
@@ -220,7 +251,7 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         return self.__persisted_fields[attr]
 
     def __setattr__(self, attr, value):
-        if attr.startswith('_'):
+        if attr.startswith("_"):
             return super().__setattr__(attr, value)
         elif attr not in self.__message_fields or attr in self._IGNORED_FIELDS:
             raise AttributeError(attr)
@@ -253,17 +284,26 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
         comparison = {}
 
         for field_name in self.__message_fields:
-            if field_name in self._IGNORED_FIELDS or field_name in self._IMMUTABLE_FIELDS:
+            if (
+                field_name in self._IGNORED_FIELDS
+                or field_name in self._IMMUTABLE_FIELDS
+            ):
                 continue
             if getattr(ref, field_name) != getattr(self.__message, field_name):
-                field_value = self.__get_wrapped_field_value(field_name, evaluate_getters=False)
+                field_value = self.__get_wrapped_field_value(
+                    field_name, evaluate_getters=False
+                )
                 if isinstance(field_value, GRPCMessageWrapper):
-                    nested_comparison = field_value._compare(ref=getattr(ref, field_name))
+                    nested_comparison = field_value._compare(
+                        ref=getattr(ref, field_name)
+                    )
                     if nested_comparison:
                         comparison[field_name] = nested_comparison
                 else:
                     comparison[field_name] = (
-                        self.__get_wrapped_value(field=field_name, value=getattr(ref, field_name)),
+                        self.__get_wrapped_value(
+                            field=field_name, value=getattr(ref, field_name)
+                        ),
                         self.__get_wrapped_field_value(field_name),
                     )
 
@@ -271,11 +311,11 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
 
     def _to_json(self):
         from google.protobuf.json_format import MessageToDict
+
         return MessageToDict(self._message, including_default_value_fields=True)
 
 
 class GRPCInvisibleWrapper(GRPCMessageWrapper):
-
     @abstractmethod
     def __get__(self):
         raise NotImplementedError
@@ -298,7 +338,9 @@ class GRPCInvisibleSequenceWrapper(GRPCInvisibleWrapper):
         sequence = getattr(self, self._SEQUENCE_ATTR)
         while sequence:
             sequence.pop()
-        sequence.extend(v._message if isinstance(v, GRPCMessageWrapper) else v for v in value)
+        sequence.extend(
+            v._message if isinstance(v, GRPCMessageWrapper) else v for v in value
+        )
 
     @override
     def _compare(self, ref=None):
@@ -306,7 +348,6 @@ class GRPCInvisibleSequenceWrapper(GRPCInvisibleWrapper):
 
 
 class GRPCContainerWrapper:
-
     def __init__(self, wrapper=None):
         self._wrapper = wrapper
         self.__wrapper_cache = {}
@@ -314,7 +355,11 @@ class GRPCContainerWrapper:
     def _wrap(self, obj):
         cache_key = id(obj)
         if cache_key not in self.__wrapper_cache:
-            self.__wrapper_cache[cache_key] = self._wrapper(obj) if self._wrapper else GRPCMessageWrapper.for_message(obj)
+            self.__wrapper_cache[cache_key] = (
+                self._wrapper(obj)
+                if self._wrapper
+                else GRPCMessageWrapper.for_message(obj)
+            )
         return self.__wrapper_cache[cache_key]
 
     def _unwrap(self, obj):
@@ -329,7 +374,6 @@ class GRPCContainerWrapper:
 
 
 class GRPCMapMessageWrapper(GRPCContainerWrapper, collections.abc.MutableMapping):
-
     def __init__(self, map, wrapper=None):
         self._map = map
         GRPCContainerWrapper.__init__(self, wrapper=wrapper)
@@ -368,7 +412,6 @@ class GRPCMapMessageWrapper(GRPCContainerWrapper, collections.abc.MutableMapping
 
 
 class GRPCRepeatedMessageWrapper(GRPCContainerWrapper, collections.abc.MutableSequence):
-
     def __init__(self, sequence, wrapper=None):
         self._sequence = sequence
         GRPCContainerWrapper.__init__(self, wrapper=wrapper)
@@ -399,21 +442,31 @@ class GRPCRepeatedMessageWrapper(GRPCContainerWrapper, collections.abc.MutableSe
 
     def insert(self, index, obj):
         obj = self._unwrap(obj)
-        if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
+        if isinstance(
+            self._sequence,
+            google.protobuf.internal.containers.RepeatedCompositeFieldContainer,
+        ):
             if index == len(self):
                 self._sequence.extend([obj])
             else:
-                raise RuntimeError("Insertion is only supported for repeated scalar containers.")
+                raise RuntimeError(
+                    "Insertion is only supported for repeated scalar containers."
+                )
         else:
             self._sequence.insert(index, obj)
 
     # Additional convenience methods
 
     def add(self, **kwargs):
-        if isinstance(self._sequence, google.protobuf.pyext._message.RepeatedCompositeContainer):
+        if isinstance(
+            self._sequence,
+            google.protobuf.internal.containers.RepeatedCompositeFieldContainer,
+        ):
             self.append(self._wrapper(**kwargs))
         else:
-            RuntimeError("Addition is only supported for repeated composite containers. Use `.append()` for scalar values.")
+            RuntimeError(
+                "Addition is only supported for repeated composite containers. Use `.append()` for scalar values."
+            )
 
     def __repr__(self):
         return repr(list(self))

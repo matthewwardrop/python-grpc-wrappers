@@ -1,14 +1,28 @@
-from . import wrappers  # noqa: F401
-from ._version import __author__, __author_email__, __version__  # noqa: F401
+from . import wrappers
 from .wrapper import (
-    GRPCInvisibleSequenceWrapper, GRPCInvisibleWrapper, GRPCMessageWrapper,
-    GRPCRepeatedMessageWrapper
+    GRPCInvisibleSequenceWrapper,
+    GRPCInvisibleWrapper,
+    GRPCMessageWrapper,
+    GRPCRepeatedMessageWrapper,
 )
 
+try:
+    from ._version import __version__, __version_tuple__
+except ImportError:  # pragma: no cover
+    __version__ = version = "unknown"
+    __version_tuple__ = version_tuple = ("unknown",)  # type: ignore
+
+__author__ = "Matthew Wardrop"
+__author_email__ = "mpwardrop@gmail.com"
 
 __all__ = [
-    'GRPCInvisibleSequenceWrapper',
-    'GRPCInvisibleWrapper',
-    'GRPCMessageWrapper',
-    'GRPCRepeatedMessageWrapper',
+    # "__version__",
+    # "__version_tuple__",
+    # "__author__",
+    # "__author_email__",
+    "wrappers",
+    "GRPCInvisibleSequenceWrapper",
+    "GRPCInvisibleWrapper",
+    "GRPCMessageWrapper",
+    "GRPCRepeatedMessageWrapper",
 ]

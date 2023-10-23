@@ -1,5 +1,4 @@
 import arrow
-import google.protobuf.pyext._message
 import google.protobuf.timestamp_pb2
 import google.protobuf.wrappers_pb2
 from interface_meta import override
@@ -8,7 +7,6 @@ from ..wrapper import GRPCInvisibleWrapper
 
 
 class ProtobufWrapper(GRPCInvisibleWrapper):
-
     @override
     def __get__(self):
         return self._message.value
@@ -19,7 +17,7 @@ class ProtobufWrapper(GRPCInvisibleWrapper):
 
     @override
     def _compare(self, ref=None):
-        return super()._compare(ref=ref).get('value')
+        return super()._compare(ref=ref).get("value")
 
 
 class ProtobufDoubleWrapper(ProtobufWrapper):
@@ -73,7 +71,11 @@ class ProtobufTimestampWrapper(GRPCInvisibleWrapper):
 
     @override
     def __get__(self):
-        return self._message.ToDatetime() if self._message.seconds > 0 or self._message.nanos > 0 else None
+        return (
+            self._message.ToDatetime()
+            if self._message.seconds > 0 or self._message.nanos > 0
+            else None
+        )
 
     @override
     def __set__(self, value):

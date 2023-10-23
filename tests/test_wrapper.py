@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Union
 
 import pytest
 
@@ -30,27 +31,27 @@ def test_basic_types(wrapped):
         wrapped.string_value = 10
 
     assert set(wrapped._compare()) == {
-        'bool_value',
-        'int_value',
-        'string_value',
+        "bool_value",
+        "int_value",
+        "string_value",
     }
 
 
 def test_enum_types(wrapped):
     assert isinstance(wrapped.enum_value, Enum)
     assert wrapped.enum_value == wrapped.enum_value.A
-    assert set(wrapped.enum_value.__class__.__members__) == set('ABCDE')
+    assert set(wrapped.enum_value.__class__.__members__) == set("ABCDE")
 
-    wrapped.enum_value = 'B'
+    wrapped.enum_value = "B"
     assert wrapped.enum_value == wrapped.enum_value.B
 
     wrapped.enum_value = 2
     assert wrapped.enum_value == wrapped.enum_value.C
 
     with pytest.raises(KeyError):
-        wrapped.enum_value = 'INVALID'
+        wrapped.enum_value = "INVALID"
 
-    assert set(wrapped._compare()) == {'enum_value'}
+    assert set(wrapped._compare()) == {"enum_value"}
 
 
 def test_submessage(wrapped):
@@ -62,9 +63,9 @@ def test_submessage(wrapped):
     assert wrapped.submessage.bool_value is True
 
     changes = wrapped._compare()
-    assert set(changes) == {'submessage'}
-    assert isinstance(changes['submessage'], dict)
-    assert set(changes['submessage']) == {'bool_value'}
+    assert set(changes) == {"submessage"}
+    assert isinstance(changes["submessage"], dict)
+    assert set(changes["submessage"]) == {"bool_value"}
 
 
 def test_nested_submessage(wrapped):
@@ -76,9 +77,9 @@ def test_nested_submessage(wrapped):
     assert wrapped.nested_submessage.bool_value is True
 
     changes = wrapped._compare()
-    assert set(changes) == {'nested_submessage'}
-    assert isinstance(changes['nested_submessage'], dict)
-    assert set(changes['nested_submessage']) == {'bool_value'}
+    assert set(changes) == {"nested_submessage"}
+    assert isinstance(changes["nested_submessage"], dict)
+    assert set(changes["nested_submessage"]) == {"bool_value"}
 
 
 def test_repeated_scalar_types(wrapped):
@@ -99,7 +100,7 @@ def test_repeated_scalar_types(wrapped):
         wrapped.int_values = "String"
     assert len(wrapped.int_values) == 4
 
-    assert set(wrapped._compare()) == {'int_values'}
+    assert set(wrapped._compare()) == {"int_values"}
 
 
 def test_repeated_enum_types(wrapped):
@@ -114,15 +115,14 @@ def test_repeated_enum_types(wrapped):
     assert len(wrapped.enum_values) == 4
 
     wrapped.enum_values = [1, 2, 3, 4]
-    assert [ev.value for ev in wrapped.enum_values] == [
-        1, 2, 3, 4
-    ]
+    assert [ev.value for ev in wrapped.enum_values] == [1, 2, 3, 4]
 
-    with pytest.raises(TypeError):
+    with pytest.raises(Exception):
+        # Could be a TypeError or ValueError depending on protobuf version
         wrapped.enum_values = "String"
     assert len(wrapped.enum_values) == 4
 
-    assert set(wrapped._compare()) == {'enum_values'}
+    assert set(wrapped._compare()) == {"enum_values"}
 
 
 def test_repeated_message_types(wrapped):
@@ -143,4 +143,4 @@ def test_repeated_message_types(wrapped):
         wrapped.submessages = "String"
     assert len(wrapped.submessages) == 4
 
-    assert set(wrapped._compare()) == {'submessages'}
+    assert set(wrapped._compare()) == {"submessages"}
