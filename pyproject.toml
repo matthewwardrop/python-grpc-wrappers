@@ -27,7 +27,7 @@ dependencies = [
     "arrow",
     "grpcio",
     "interface_meta",
-    "protobuf>=4.21",
+    "protobuf",
 ]
 
 [project.urls]
