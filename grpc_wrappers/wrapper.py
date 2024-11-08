@@ -312,7 +312,12 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     def _to_json(self):
         from google.protobuf.json_format import MessageToDict
 
-        return MessageToDict(self._message, including_default_value_fields=True)
+        try:
+            return MessageToDict(
+                self._message, always_print_fields_with_no_presence=True
+            )
+        except TypeError:
+            return MessageToDict(self._message, including_default_value_fields=True)
 
 
 class GRPCInvisibleWrapper(GRPCMessageWrapper):
