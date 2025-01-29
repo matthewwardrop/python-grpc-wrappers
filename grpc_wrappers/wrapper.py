@@ -214,6 +214,9 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
     def __set_field_value(self, field, value):
         descriptor = self.__get_field_descriptor(field)
 
+        # Invalidate persisted fields
+        self.__persisted_fields.pop(field, None)
+
         # Allow wrappers to handle setting if this is not directly set on the
         # message wrapped by this instance.
         wrapper = self.__get_wrapped_field_value(field, evaluate_getters=False)
@@ -234,7 +237,6 @@ class GRPCMessageWrapper(metaclass=GRPCMessageWrapperMeta):
                     f"`{field}` is an enum type, but messages of type `{self._message.__class__}` have not yet been individually wrapped and so only integer enum code will be accepted. Use with care."
                 )
 
-        self.__persisted_fields.pop(field, None)
         # If value is wrapped, unwrap it before assigning to the GRPC message.
         if isinstance(value, GRPCMessageWrapper):
             value = value._message
